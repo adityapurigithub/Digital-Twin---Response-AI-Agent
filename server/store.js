@@ -14,6 +14,15 @@ const store = {
   // VIP contact directives
   contacts: [
     {
+      id: 'test_user',
+      name: 'My Test Number',
+      platform: 'WhatsApp',
+      phone: '+9288123333', // <--- REPLACE THIS WITH YOUR ACTUAL WHATSAPP NUMBER (including country code)
+      tag: 'Tester',
+      directive: 'Always reply enthusiastically and confirm that the auto-reply test is successful.',
+      autoApprove: true, // This bypasses the review queue and guarantees an auto-reply
+    },
+    {
       id: 'c1',
       name: 'Mom',
       platform: 'WhatsApp',
@@ -29,7 +38,7 @@ const store = {
       phone: null,
       tag: 'General',
       directive: 'Be helpful, friendly, and casual. Match their language: if they type in Hinglish or Hindi, reply in Hinglish. Keep replies short and natural. Sound like Aditya.',
-      autoApprove: false,
+      autoApprove: true,
     },
   ],
 
