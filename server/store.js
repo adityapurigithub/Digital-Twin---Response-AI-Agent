@@ -38,7 +38,7 @@ const store = {
       phone: null,
       tag: 'General',
       directive: 'Be helpful, friendly, and casual. Match their language: if they type in Hinglish or Hindi, reply in Hinglish. Keep replies short and natural. Sound like Aditya.',
-      autoApprove: true,
+      autoApprove: false,
     },
   ],
 
@@ -99,7 +99,7 @@ function removeFromReviewQueue(id) {
 // ─── Contact helpers ───────────────────────────────────────────────
 function findContactByPhone(phone) {
   return store.contacts.find(
-    (c) => c.phone === phone || c.phone === null
+    (c) => c.phone === phone
   );
 }
 

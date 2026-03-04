@@ -27,7 +27,7 @@ const THRESHOLD = () => Number(process.env.CONFIDENCE_THRESHOLD || 85);
 
 router.post('/whatsapp', async (req, res) => {
   try {
-    const body       = req.body;
+    const body       = req.body || {};
     const from       = body.From   || 'whatsapp:+910000000000'; // e.g. "whatsapp:+919876543210"
     const msgBody    = body.Body   || '';
     const senderName = body.ProfileName || from.replace('whatsapp:', '');
@@ -65,17 +65,32 @@ router.post('/whatsapp', async (req, res) => {
     });
 
     // ── 4. Decision: Auto-send or Queue? ───────────────────────
-    if (confidence >= THRESHOLD() || autoApprove) {
-      // AUTO-SEND
-      await sendWhatsApp(from, draft);
-      message.status = 'auto-sent';
-      store.stats.totalReplied++;
-      store.stats.autoSent++;
+    let wentToQueue = false;
 
-      logActivity('✅', `Auto-replied to ${senderName}`, `${platform} · ${confidence}% confidence · ${intent}`);
-      console.log(`[AutoPilot] ✅ Auto-sent reply to ${senderName}`);
+    if (confidence >= THRESHOLD() || autoApprove) {
+      // Try to AUTO-SEND
+      try {
+        await sendWhatsApp(from, draft);
+        message.status = 'auto-sent';
+        store.stats.totalReplied++;
+        store.stats.autoSent++;
+
+        logActivity('✅', `Auto-replied to ${senderName}`, `${platform} · ${confidence}% confidence · ${intent}`);
+        console.log(`[AutoPilot] ✅ Auto-sent reply to ${senderName}`);
+      } catch (twilioErr) {
+        console.error(`[AutoPilot] ❌ Twilio threw an error while auto-sending to ${senderName}. Falling back to Review Queue. Error: ${twilioErr.message}`);
+        wentToQueue = true; // Fall back
+      }
     } else {
+      wentToQueue = true;
+    }
+
+    if (wentToQueue) {
       // ADD TO REVIEW QUEUE
+      const queueReason = (confidence >= THRESHOLD() || autoApprove) 
+        ? `⚠️ Auto-send failed! Twilio encountered an error.` 
+        : `${intent} — AI confidence ${confidence}% below threshold. Awaiting your approval.`;
+
       const queueEntry = {
         id:       message.id,
         messageId: message.id,
@@ -88,7 +103,7 @@ router.post('/whatsapp', async (req, res) => {
         confidence,
         sentiment,
         intent,
-        reason:   `${intent} — AI confidence ${confidence}% below threshold. Awaiting your approval.`,
+        reason:   queueReason,
         from,
       };
 
