@@ -43,7 +43,7 @@ const app  = express();
 const PORT = process.env.PORT || 3001;
 
 // ─── Middleware ───────────────────────────────────────────────────────
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5174' }));
+app.use(cors({ origin: '*' })); // Allow all origins to fix Vercel CORS issues
 app.use(morgan('dev'));
 
 // Twilio sends URL-encoded bodies for webhooks
@@ -107,3 +107,6 @@ app.listen(PORT, () => {
   if (!hasTwilio) console.log('  ⚠  Twilio: DEMO MODE — add Twilio credentials to .env to go live\n');
   else            console.log('  ✅ Twilio: Live\n');
 });
+
+// Export the app for Vercel
+module.exports = app;
