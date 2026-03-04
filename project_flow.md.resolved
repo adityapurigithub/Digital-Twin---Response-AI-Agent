@@ -1,0 +1,251 @@
+# 🤖 AutoPilot AI — Complete Project Flow & Architecture
+
+> **Project:** Auto-Responder Digital Twin  
+> **Goal:** An AI that reads your WhatsApp messages, decides whether it can confidently reply, auto-sends routine ones, and flags tricky ones for your manual review.
+
+---
+
+## 📁 Project Structure
+
+```
+GPT chatbot/
+├── client/                  ← React frontend (Vite)
+│   └── src/
+│       ├── App.jsx          ← Layout: Sidebar + TopBar + Router
+│       ├── main.jsx         ← React entry
+│       ├── index.css        ← Full design system (dark theme)
+│       ├── pages/
+│       │   ├── Dashboard.jsx    ← Stats, Activity, Simulate panel
+│       │   ├── Messages.jsx     ← All messages (search/filter)
+│       │   ├── ReviewQueue.jsx  ← Approve / Dismiss drafts
+│       │   ├── Contacts.jsx     ← VIP contacts + directives
+│       │   └── SettingsPage.jsx ← AI config, API keys (UI only)
+│       ├── services/
+│       │   └── api.js           ← All HTTP calls to backend
+│       └── hooks/
+│           └── useLiveData.js   ← Auto-polling custom hook
+│
+├── server/                  ← Node.js + Express backend
+│   ├── index.js             ← Server entry, middleware, routes
+│   ├── store.js             ← In-memory "database"
+│   ├── routes/
+│   │   ├── webhook.js       ← POST /webhook/whatsapp (Twilio)
+│   │   ├── simulate.js      ← POST /api/simulate (dev testing)
+│   │   ├── review.js        ← Approve / Dismiss queue items
+│   │   ├── messages.js      ← GET messages, stats, activity
+│   │   └── contacts.js      ← CRUD for VIP contacts
+│   ├── services/
+│   │   ├── openai.js        ← GPT-4o-mini: draft + confidence
+│   │   └── twilio.js        ← Send WhatsApp replies
+│   ├── .env                 ← Your actual keys (gitignored)
+│   └── .env.example         ← Template for keys
+│
+└── tech_and_features.md     ← Feature spec document
+```
+
+---
+
+## 🔄 End-to-End Message Flow
+
+This is the **core loop** of the entire application:
+
+```mermaid
+flowchart TD
+    A["📩 Incoming WhatsApp Message"] --> B["Twilio forwards to POST /webhook/whatsapp"]
+    B --> C["Find contact directive from VIP list"]
+    C --> D["Call OpenAI: analyzeAndDraft()"]
+    D --> E{"Confidence >= 85%\nor autoApprove?"}
+    E -- "Yes" --> F["✅ Auto-send reply via Twilio"]
+    E -- "No" --> G["⌛ Add to Review Queue"]
+    F --> H["Update stats + log activity"]
+    G --> H
+    H --> I["Frontend polls & displays results"]
+    I --> J{"User reviews flagged message"}
+    J -- "Approve" --> K["Send via Twilio + remove from queue"]
+    J -- "Dismiss" --> L["Mark dismissed + remove from queue"]
+```
+
+### Step-by-step breakdown:
+
+| Step | What happens | File |
+|------|-------------|------|
+| **1. Message arrives** | Twilio receives a WhatsApp message to your number and sends a webhook POST to your server | [webhook.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/webhook.js) |
+| **2. Contact lookup** | Server checks if the sender's phone matches any VIP contact with custom directives (e.g. "Mom → always be warm") | [store.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/store.js#L90-L101) |
+| **3. AI Analysis** | OpenAI GPT-4o-mini receives the message + persona rules + contact directive → returns a JSON with `draft`, `confidence`, `sentiment`, `intent` | [openai.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/services/openai.js) |
+| **4. Confidence decision** | If `confidence >= 85` (or contact has `autoApprove: true`) → auto-send. Otherwise → queue for review | [webhook.js:68](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/webhook.js#L68) |
+| **5. Auto-send** | [sendWhatsApp()](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/services/twilio.js#24-52) fires the reply through Twilio | [twilio.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/services/twilio.js) |
+| **6. Review queue** | Low-confidence messages are stored with draft + reason. Dashboard shows them for approval | [review.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/review.js) |
+| **7. Dashboard polls** | Frontend polls every 4 seconds for stats, messages, and activity | [useLiveData.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/hooks/useLiveData.js) |
+
+---
+
+## 🧠 AI Engine (OpenAI Service)
+
+[openai.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/services/openai.js)
+
+### What it does:
+1. Constructs a **system prompt** with Aditya's persona rules + contact-specific directive
+2. Sends the incoming message to **GPT-4o-mini**
+3. Returns structured JSON: `{ draft, confidence, sentiment, intent }`
+
+### Persona Rules (hardcoded in store):
+- Short, punchy, real replies — no formal letter vibes
+- Uses 'bro', 'dude', 'yaar' with friends
+- Professional with clients, warm with family
+- Never says "I apologize" or "I am an AI"
+
+### Confidence Scoring Guide:
+| Range | Level | Examples |
+|-------|-------|---------|
+| 90-100 | ✅ Routine | Greetings, birthday wishes, simple Q&A |
+| 70-89 | 🟡 Moderate | Scheduling, social plans, friend chat |
+| 40-69 | 🟠 Higher stakes | Work/client messages, commitments |
+| 0-39 | 🔴 Sensitive | Emotional conflicts, financial, emergencies |
+
+### Demo Mode:
+When no OpenAI API key is present, the service falls back to **mock responses** (keyword matching):
+- "time" / "meeting" → 97% confidence auto-reply
+- "project" / "update" → 58% confidence → goes to review
+- "upset" / "angry" → 38% confidence → goes to review
+
+---
+
+## 📡 All API Endpoints
+
+| Method | Endpoint | Purpose | File |
+|--------|----------|---------|------|
+| `POST` | `/webhook/whatsapp` | Receives real Twilio webhook | [webhook.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/webhook.js) |
+| `POST` | `/api/simulate` | Fake an incoming message (dev test) | [simulate.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/simulate.js) |
+| `GET` | `/api/messages` | All messages (filterable by platform/status/search) | [messages.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/messages.js) |
+| `GET` | `/api/messages/stats` | Live stat counts | [messages.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/messages.js) |
+| `GET` | `/api/messages/activity` | Activity feed (last 20 events) | [messages.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/messages.js) |
+| `GET` | `/api/review` | Review queue items | [review.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/review.js) |
+| `POST` | `/api/review/:id/approve` | Approve draft (can edit before sending) | [review.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/review.js) |
+| `POST` | `/api/review/:id/dismiss` | Dismiss without sending | [review.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/review.js) |
+| `GET` | `/api/contacts` | List all VIP contacts | [contacts.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/contacts.js) |
+| `POST` | `/api/contacts` | Add a new contact | [contacts.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/contacts.js) |
+| `PATCH` | `/api/contacts/:id` | Update directive/autoApprove | [contacts.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/contacts.js) |
+| `DELETE` | `/api/contacts/:id` | Remove a contact | [contacts.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/routes/contacts.js) |
+| `GET` | `/health` | Server health + service status | [index.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/index.js) |
+
+---
+
+## 🖥️ Frontend Pages
+
+### 1. Dashboard ([Dashboard.jsx](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/pages/Dashboard.jsx))
+- **Mode Banner** — Shows "Live" or "Demo Mode" based on API key status
+- **4 Stat Cards** — Total Replied, Auto-Sent, Needs Review, Total Messages
+- **Recent Messages** — Last few messages with confidence bars and status badges
+- **Live Activity Feed** — Real-time log of what the AI did (auto-sent, flagged, etc.)
+- **AI Engine Status** — Persona Match Accuracy, Auto-Reply Rate, Sentiment Detection bars
+- **Simulate Panel** — Type a fake incoming message → see the AI's draft + confidence + decision
+
+### 2. All Messages ([Messages.jsx](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/pages/Messages.jsx))
+- Search by sender name or message text
+- Filter by platform (WhatsApp / Instagram / Facebook)
+- Filter by status (Auto-Sent / Review / Dismissed)
+- Shows draft, confidence %, intent badge for each message
+
+### 3. Review Queue ([ReviewQueue.jsx](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/pages/ReviewQueue.jsx))
+- Shows all messages where AI confidence was too low
+- Each item shows: original message, AI draft, confidence, sentiment, intent, reason
+- Two actions: **Approve** (optionally edit the draft) or **Dismiss**
+- Approving sends the reply via Twilio
+
+### 4. VIP Contacts ([Contacts.jsx](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/pages/Contacts.jsx))
+- Add/Edit/Delete contacts with custom directives
+- Set tags (Family, Friends, Work, General)
+- Toggle `autoApprove` — skip review for trusted contacts
+- Edit the AI directive per contact (e.g. "Always be warm and loving")
+
+### 5. Settings ([SettingsPage.jsx](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/client/src/pages/SettingsPage.jsx))
+- Confidence threshold slider (50-99%)
+- Active persona selector
+- Platform connection toggles (WhatsApp connected, IG/FB future)
+- Notification & DND toggles
+- API key input fields
+
+> [!IMPORTANT]
+> **Settings page is UI-only right now** — the toggles and inputs don't actually save to the backend. The confidence threshold is read from the server's [.env](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/.env) file, not from the frontend.
+
+---
+
+## 💾 Data Layer (In-Memory Store)
+
+[store.js](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/store.js)
+
+All data lives in a JavaScript object in memory. **No database yet** — restarting the server clears everything.
+
+| Collection | Purpose | Cap |
+|-----------|---------|-----|
+| `messages[]` | All processed messages | 200 max |
+| `reviewQueue[]` | Messages needing manual approval | Uncapped |
+| `contacts[]` | VIP contact directives | Seeded with "Mom" + "Default" |
+| `persona[]` | Aditya's writing style rules | 6 rules |
+| `activity[]` | Event log (auto-sent, flagged, approved) | 50 max |
+| `stats{}` | Counters: totalReplied, autoSent, needsReview | — |
+
+---
+
+## 🔌 External Services
+
+| Service | Purpose | Current Status |
+|---------|---------|----------------|
+| **OpenAI** (GPT-4o-mini) | Generates reply drafts + confidence scores | Works live with key, falls back to mock without |
+| **Twilio** (WhatsApp API) | Sends WhatsApp messages | Works live with credentials, logs to console without |
+
+Both services have a **demo mode** — the app is fully usable for testing without any API keys.
+
+---
+
+## ✅ What's Working (Phase 1 + Phase 2 partial)
+
+| Feature | Status |
+|---------|--------|
+| Express server with all routes | ✅ Done |
+| OpenAI integration (draft + confidence) | ✅ Done |
+| Twilio WhatsApp integration | ✅ Done |
+| Confidence-based auto-send vs. review queue | ✅ Done |
+| Simulate panel for dev testing | ✅ Done |
+| React dashboard with live polling | ✅ Done |
+| Review queue (approve / edit / dismiss) | ✅ Done |
+| VIP contacts with CRUD | ✅ Done |
+| Contact-specific AI directives | ✅ Done |
+| Persona rules in system prompt | ✅ Done |
+| Activity feed logging | ✅ Done |
+| Demo mode (no keys needed to test) | ✅ Done |
+| CORS + body-parser for Twilio webhooks | ✅ Done |
+| Health check endpoint | ✅ Done |
+
+## 🚧 What's Not Done Yet
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Database** (MongoDB/Postgres) | ❌ Not started | Using in-memory store — data lost on restart |
+| **Settings → Backend sync** | ❌ UI only | Threshold/persona/API keys in frontend don't save |
+| **DND / Deep Work Mode** | ❌ UI only | Toggle exists but doesn't affect AI behavior |
+| **"URGENT" Breakthrough keyword** | ❌ Not started | Spec'd but not implemented |
+| **Morning Executive Summary** | ❌ Not started | Phase 4 feature |
+| **Instagram / Facebook integration** | ❌ Not started | Phase 4 feature |
+| **Persona training from chat history** | ❌ Not started | Vector DB (Pinecone/Weaviate) not integrated |
+| **Twilio webhook signature validation** | ⚠️ Built, not wired | [validateTwilioSignature](file:///E:/ANTIGRAVITY/Projects/GPT%20chatbot/server/services/twilio.js#53-74) in twilio.js but not used as middleware |
+| **Real-time updates (WebSocket)** | ❌ Not started | Currently uses polling every 4s |
+
+---
+
+## 🚀 How to Run
+
+```bash
+# Terminal 1 — Backend
+cd server
+npm install
+cp .env.example .env        # fill in keys (or leave as placeholder for demo)
+npm run dev                  # starts on http://localhost:3001
+
+# Terminal 2 — Frontend
+cd client
+npm install
+npm run dev                  # starts on http://localhost:5174
+```
+
+Open `http://localhost:5174` → you'll see the dashboard. Use the **Simulate panel** to fake incoming messages and watch the AI + Review Queue in action.
