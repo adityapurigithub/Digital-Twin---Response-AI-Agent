@@ -59,6 +59,11 @@ app.use('/api/review',   reviewRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/simulate', simulateRoutes);
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ success: true, message: 'AutoPilot AI Server is running!' });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   const hasOpenAI  = !!(process.env.OPENAI_API_KEY  && process.env.OPENAI_API_KEY  !== 'sk-placeholder');
